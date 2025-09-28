@@ -29,6 +29,7 @@ A comprehensive backend service that evaluates candidate CVs and project reports
 ```json
 {
   "cv_file": "cv-files/candidate.pdf",
+  "project_file": "cv-files/project_report.pdf",
   "job_description": "Senior Backend Engineer with 5+ years experience...",
   "job_description_file": "cv-files/job_spec.txt"
 }
@@ -38,10 +39,18 @@ A comprehensive backend service that evaluates candidate CVs and project reports
 - `cv_file`: Path to uploaded CV file (required)
 - Either `job_description` (text) OR `job_description_file` (file path) must be provided
 
+**Optional Fields:**
+- `project_file`: Path to uploaded project file (optional)
+
 **Processing Logic:**
-- CV file is analyzed for both CV content and project information
-- Job description can be provided as text or uploaded as a file
-- If both job description formats are provided, the file takes precedence
+- **CV file**: Always required for candidate evaluation
+- **Project content**: 
+  - If `project_file` is provided → Full project evaluation with detailed scoring and feedback
+  - If `project_file` is NOT provided → CV-only evaluation with default project response
+- **Job description**: Can be provided as text or uploaded as a file
+- **Evaluation modes**: 
+  - **Full evaluation**: CV + Project assessment (when project file provided)
+  - **CV-only evaluation**: CV assessment with informative project placeholder (when no project file)
 
 ## Architecture
 
@@ -147,20 +156,33 @@ curl -X POST -F "file=@job_description.txt" http://localhost:8080/api/v1/upload
 
 ### 2. Start Evaluation
 
+**Option 1: Single CV file with text job description**
 ```bash
 curl -X POST -H "Content-Type: application/json" \
   -d '{
-    "cv_file": "uploads/cv-file-path.pdf",
+    "cv_file": "cv-files/candidate.pdf",
     "job_description": "Senior Backend Engineer with AI/ML experience..."
   }' \
   http://localhost:8080/api/v1/evaluate
 ```
 
-Or with job description file:
+**Option 2: Separate CV and project files**
 ```bash
 curl -X POST -H "Content-Type: application/json" \
   -d '{
     "cv_file": "cv-files/candidate.pdf",
+    "project_file": "cv-files/project_report.pdf",
+    "job_description": "Senior Backend Engineer with AI/ML experience..."
+  }' \
+  http://localhost:8080/api/v1/evaluate
+```
+
+**Option 3: With job description file**
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{
+    "cv_file": "cv-files/candidate.pdf",
+    "project_file": "cv-files/project_report.pdf",
     "job_description_file": "cv-files/job_spec.txt"
   }' \
   http://localhost:8080/api/v1/evaluate
@@ -190,7 +212,7 @@ Responses:
 }
 ```
 
-**Completed:**
+**Completed (with project file):**
 ```json
 {
   "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -201,6 +223,21 @@ Responses:
     "project_score": 7.5,
     "project_feedback": "Meets prompt chaining requirements, lacks error handling robustness.",
     "overall_summary": "Good candidate fit, would benefit from deeper RAG knowledge."
+  }
+}
+```
+
+**Completed (CV-only, no project file):**
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "completed",
+  "result": {
+    "cv_match_rate": 0.82,
+    "cv_feedback": "Strong in backend and cloud, limited AI integration experience.",
+    "project_score": 0.0,
+    "project_feedback": "No project file provided for evaluation. To get a comprehensive project assessment, please upload a separate project file containing technical documentation, code samples, or project reports.",
+    "overall_summary": "Good CV match for the position. Candidate shows solid qualifications with minor gaps in some areas. Project evaluation not available - consider uploading project files to get a comprehensive evaluation."
   }
 }
 ```
@@ -293,10 +330,11 @@ Project information is automatically extracted from the CV file, analyzing any p
    - Automatic bucket management
 
 4. **Real Document Processing**
-   - Comprehensive text extraction from CV files
-   - Support for PDF, DOCX, and text formats
-   - Intelligent content parsing for CV and project information
-   - Error recovery for corrupted files
+   - **PDF Extraction**: Dual-engine approach using both `unidoc/unipdf/v3` and `ledongthuc/pdf` libraries
+   - **DOCX Extraction**: Complete text extraction from paragraphs, tables, headers, and footers using `fumiama/go-docx`
+   - **Text Files**: Direct UTF-8 text reading
+   - **Error Recovery**: Graceful handling of corrupted files and encrypted PDFs
+   - **Content Normalization**: Automatic whitespace cleanup and formatting
 
 ### Resilience Features
 
@@ -308,7 +346,22 @@ Project information is automatically extracted from the CV file, analyzing any p
 ### File Processing
 
 - **Supported Formats**: TXT, PDF, DOCX for CV files
-- **Smart Content Extraction**: Automatically separates CV and project information from uploaded files
+- **Advanced Text Extraction**:
+  - **PDF**: Robust dual-engine extraction with encryption handling
+    - Primary: `unidoc/unipdf/v3` for complex PDFs with OCR capabilities
+    - Fallback: `ledongthuc/pdf` for basic PDF parsing
+    - Handles encrypted PDFs (tries empty password first)
+    - Graceful error recovery for corrupted files
+  - **DOCX**: Complete Microsoft Word document processing
+    - Extracts text from paragraphs, tables, headers, and footers
+    - Preserves document structure with proper spacing
+    - Handles nested tables and complex formatting
+    - Uses `fumiama/go-docx` for reliable parsing
+  - **TXT**: Direct UTF-8 text file reading
+- **Content Intelligence**: 
+  - **Single-file mode**: Automatically extracts both CV and project information from CV files
+  - **Multi-file mode**: Processes separate CV and project files for detailed evaluation
+  - **Flexible input**: Supports both approaches based on user preference
 - **File Validation**: Type checking and security validation (10MB max per file)
 - **Cloud Storage**: MinIO-based storage with UUID naming to prevent conflicts
 - **Job Description Flexibility**: Supports both text input and file upload for job descriptions

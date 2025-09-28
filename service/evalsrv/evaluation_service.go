@@ -119,15 +119,31 @@ func (s *evaluationService) processEvaluation(jobID string) {
 		jobDescription = job.Request.JobDescription
 	}
 
-	// For project content, we'll extract it from the CV files (treating them as complete documents)
-	// In a real implementation, you might want to separate CV and project content
-	projectContent := cvContent // Using CV content as project content for now
+	// Get project content - only if project file is provided
+	var result *cvweb.CVResponse
 
-	// Process with LLM
-	result, err := s.llmService.EvaluateCandidate(cvContent, projectContent, jobDescription)
-	if err != nil {
-		s.markJobFailed(jobID, "LLM evaluation failed: "+err.Error())
-		return
+	if job.Request.ProjectFile != "" {
+		// Extract project content from separate project file
+		projContent, err := s.fileService.ExtractText(job.Request.ProjectFile)
+		if err != nil {
+			s.markJobFailed(jobID, "Failed to extract project content from file "+job.Request.ProjectFile+": "+err.Error())
+			return
+		}
+
+		// Process with LLM (full evaluation including project)
+		result, err = s.llmService.EvaluateCandidate(cvContent, projContent, jobDescription)
+		if err != nil {
+			s.markJobFailed(jobID, "LLM evaluation failed: "+err.Error())
+			return
+		}
+	} else {
+		// No project file provided - evaluate only CV and provide default project info
+		var err error
+		result, err = s.llmService.EvaluateCVOnly(cvContent, jobDescription)
+		if err != nil {
+			s.markJobFailed(jobID, "LLM evaluation failed: "+err.Error())
+			return
+		}
 	}
 
 	s.mutex.Lock()

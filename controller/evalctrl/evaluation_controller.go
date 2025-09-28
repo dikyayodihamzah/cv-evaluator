@@ -33,7 +33,7 @@ func (c *evaluationController) evaluate(ctx *fiber.Ctx) error {
 		})
 	}
 
-	// Validate request
+	// Validate request - CV file is required
 	if req.CVFile == "" {
 		return ctx.Status(fiber.StatusBadRequest).JSON(model.BaseResponse{
 			Status:  "error",
@@ -48,6 +48,11 @@ func (c *evaluationController) evaluate(ctx *fiber.Ctx) error {
 			Message: "Either job_description or job_description_file is required",
 		})
 	}
+
+	// Project file is optional - if not provided, project content will be extracted from CV file
+	// This provides flexibility for users to either:
+	// 1. Use a single CV file that contains both CV and project information
+	// 2. Use separate CV and project files for more detailed evaluation
 
 	jobID, err := c.EvaluationService.StartEvaluation(req)
 	if err != nil {

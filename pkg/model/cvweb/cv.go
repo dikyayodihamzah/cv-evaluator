@@ -10,6 +10,7 @@ type CVResponse struct {
 
 type EvaluationRequest struct {
 	CVFile             string `json:"cv_file" validate:"required"`
+	ProjectFile        string `json:"project_file,omitempty"`
 	JobDescription     string `json:"job_description,omitempty"`
 	JobDescriptionFile string `json:"job_description_file,omitempty"`
 }
