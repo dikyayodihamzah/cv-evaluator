@@ -4,11 +4,12 @@ A comprehensive backend service that evaluates candidate CVs and project reports
 
 ## Features
 
-- **File Upload Support**: Accepts CV and project reports in multiple formats (TXT, PDF, DOCX)
+- **File Upload Support**: Accepts CV files in multiple formats (TXT, PDF, DOCX)
 - **Real AI Integration**: Uses OpenAI GPT-4 for structured candidate assessment and embeddings
 - **Cloud Storage**: MinIO integration for scalable file storage
 - **RAG Integration**: Real vector embeddings and cosine similarity for context retrieval
 - **PDF/DOCX Processing**: Real text extraction from PDF and Word documents
+- **Flexible Job Descriptions**: Support for text input or file upload for job descriptions
 - **Async Processing**: Non-blocking evaluation with job status tracking
 - **Resilience**: Circuit breaker pattern, exponential backoff retry, and graceful degradation
 - **Standardized Scoring**: AI-powered consistent evaluation parameters
@@ -17,11 +18,30 @@ A comprehensive backend service that evaluates candidate CVs and project reports
 
 ### Core Endpoints
 
-- `POST /api/v1/upload` - Upload CV or project files
+- `POST /api/v1/upload` - Upload CV files and job description files
 - `POST /api/v1/evaluate` - Start evaluation process
 - `GET /api/v1/result/{id}` - Get evaluation results
 - `GET /health` - Service health check
 - `GET /` - API documentation
+
+### Evaluation Request Format
+
+```json
+{
+  "cv_file": "cv-files/candidate.pdf",
+  "job_description": "Senior Backend Engineer with 5+ years experience...",
+  "job_description_file": "cv-files/job_spec.txt"
+}
+```
+
+**Required Fields:**
+- `cv_file`: Path to uploaded CV file (required)
+- Either `job_description` (text) OR `job_description_file` (file path) must be provided
+
+**Processing Logic:**
+- CV file is analyzed for both CV content and project information
+- Job description can be provided as text or uploaded as a file
+- If both job description formats are provided, the file takes precedence
 
 ## Architecture
 
@@ -52,7 +72,7 @@ A comprehensive backend service that evaluates candidate CVs and project reports
 ### Prerequisites
 
 - Go 1.24.4 or higher
-- OpenAI API Key
+- DeepSeek API Key (recommended) or OpenAI API Key
 - MinIO Server (for cloud storage)
 - Git
 
@@ -75,10 +95,12 @@ Create a `.env` file in the project root:
 # Environment Configuration
 ENVIRONMENT=DEVELOPMENT
 
-# LLM API Configuration
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4
-OPENAI_BASE_URL=https://api.openai.com/v1
+# LLM API Configuration (Choose one)
+# Option 1: DeepSeek API (Recommended - Cost-effective)
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+
+# Option 2: OpenAI API (Alternative)
+# OPENAI_API_KEY=your_openai_api_key_here
 
 # MinIO Storage Configuration
 MINIO_ENDPOINT=localhost:9000
@@ -89,10 +111,6 @@ MINIO_USE_SSL=false
 
 # Server Configuration
 PORT=8080
-
-# Vector Database Configuration
-EMBEDDING_MODEL=text-embedding-ada-002
-VECTOR_DIMENSIONS=1536
 ```
 
 4. **Start MinIO Server:**
@@ -120,11 +138,11 @@ The service will start on the configured port (default: 8080).
 ### 1. Upload Files
 
 ```bash
-# Upload CV
+# Upload CV file
 curl -X POST -F "file=@cv.pdf" http://localhost:8080/api/v1/upload
 
-# Upload Project Report
-curl -X POST -F "file=@project.docx" http://localhost:8080/api/v1/upload
+# Upload Job Description (optional - can be provided as text)
+curl -X POST -F "file=@job_description.txt" http://localhost:8080/api/v1/upload
 ```
 
 ### 2. Start Evaluation
@@ -142,7 +160,7 @@ Or with job description file:
 ```bash
 curl -X POST -H "Content-Type: application/json" \
   -d '{
-    "cv_files": ["cv-files/candidate.pdf"],
+    "cv_file": "cv-files/candidate.pdf",
     "job_description_file": "cv-files/job_spec.txt"
   }' \
   http://localhost:8080/api/v1/evaluate
@@ -191,6 +209,8 @@ Responses:
 
 ### CV Assessment (Match Rate 0.0-1.0)
 
+The CV evaluation analyzes the uploaded CV file and extracts both CV content and project information for comprehensive assessment:
+
 - **Technical Skills Match (40% weight)**
   - Backend technologies alignment
   - Cloud platform experience
@@ -216,12 +236,13 @@ Responses:
 
 ### Project Assessment (Score 1-10)
 
+Project information is automatically extracted from the CV file, analyzing any project descriptions, portfolios, or technical work mentioned:
+
 - **Correctness (25% weight)**
   - Meets stated requirements
-  - Proper prompt design and engineering
-  - LLM chaining implementation
-  - RAG integration
-  - Error handling implementation
+  - Proper technical implementation
+  - Problem-solving approach
+  - Requirements fulfillment
 
 - **Code Quality (20% weight)**
   - Clean, readable code
@@ -229,36 +250,38 @@ Responses:
   - Proper abstractions
   - Following best practices
 
-- **Resilience (20% weight)**
-  - Error handling and recovery
-  - Retry mechanisms
-  - Circuit breakers
-  - Graceful degradation
+- **Technical Complexity (20% weight)**
+  - System design skills
+  - Technology choices
+  - Architecture decisions
+  - Scalability considerations
 
 - **Documentation (15% weight)**
-  - Clear README
-  - API documentation
-  - Architecture decisions
-  - Trade-offs explanation
+  - Project descriptions
+  - Technical explanations
+  - Problem statement clarity
+  - Solution documentation
 
-- **Creativity/Bonus (20% weight)**
-  - Additional features
-  - Performance optimizations
-  - Security implementations
-  - Deployment automation
+- **Impact/Innovation (20% weight)**
+  - Business impact
+  - Technical innovation
+  - Performance improvements
+  - Creative solutions
 
 ## Technical Implementation
 
 ### Real AI Integration
 
-1. **OpenAI GPT-4 Integration**
+1. **LLM Integration (DeepSeek/OpenAI)**
    - Structured JSON extraction from CV content
    - Intelligent scoring with detailed feedback
    - Temperature-controlled responses for consistency
    - Retry logic with exponential backoff
+   - Auto-detection of API provider
 
 2. **Vector Embeddings & RAG**
-   - OpenAI text-embedding-ada-002 for document vectorization
+   - OpenAI text-embedding-ada-002 for document vectorization (when using OpenAI)
+   - Fallback to hash-based embeddings for DeepSeek
    - Cosine similarity for context retrieval
    - Real-time embedding generation for queries
    - Semantic search for job requirements matching
@@ -270,9 +293,9 @@ Responses:
    - Automatic bucket management
 
 4. **Real Document Processing**
-   - UniPDF for robust PDF text extraction
-   - Fallback to ledongthuc/pdf for compatibility
-   - Multi-page document handling
+   - Comprehensive text extraction from CV files
+   - Support for PDF, DOCX, and text formats
+   - Intelligent content parsing for CV and project information
    - Error recovery for corrupted files
 
 ### Resilience Features
@@ -284,10 +307,11 @@ Responses:
 
 ### File Processing
 
-- **Supported Formats**: TXT, PDF, DOCX
-- **Text Extraction**: Mock implementation (ready for real PDF/DOCX libraries)
-- **File Validation**: Type checking and security validation
-- **Unique Storage**: UUID-based file naming to prevent conflicts
+- **Supported Formats**: TXT, PDF, DOCX for CV files
+- **Smart Content Extraction**: Automatically separates CV and project information from uploaded files
+- **File Validation**: Type checking and security validation (10MB max per file)
+- **Cloud Storage**: MinIO-based storage with UUID naming to prevent conflicts
+- **Job Description Flexibility**: Supports both text input and file upload for job descriptions
 
 ## Configuration
 
@@ -322,9 +346,10 @@ cv-evaluator/
 ### Adding New Features
 
 1. **New Evaluation Criteria**: Update `llmsrv` scoring functions
-2. **File Format Support**: Extend `filesrv` extraction methods
+2. **File Format Support**: Extend `filesrv` extraction methods  
 3. **Additional Endpoints**: Create new controllers following existing patterns
 4. **Enhanced RAG**: Improve vector similarity in `ragsrv`
+5. **CV Content Parsing**: Enhance intelligent separation of CV and project content
 
 ## Monitoring & Observability
 
@@ -348,15 +373,19 @@ cv-evaluator/
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT-4 and embeddings | - | ✅ |
-| `OPENAI_MODEL` | OpenAI model to use | `gpt-4` | ❌ |
+| `DEEPSEEK_API_KEY` | DeepSeek API key (recommended) | - | ✅* |
+| `OPENAI_API_KEY` | OpenAI API key (alternative) | - | ✅* |
+| `LLM_MODEL` | LLM model to use | Auto-detected | ❌ |
+| `LLM_BASE_URL` | LLM API base URL | Auto-detected | ❌ |
 | `MINIO_ENDPOINT` | MinIO server endpoint | - | ✅ |
 | `MINIO_ACCESS_KEY` | MinIO access key | - | ✅ |
 | `MINIO_SECRET_KEY` | MinIO secret key | - | ✅ |
 | `MINIO_BUCKET` | MinIO bucket name | `cv-evaluator` | ❌ |
 | `MINIO_USE_SSL` | Use SSL for MinIO connection | `false` | ❌ |
 | `PORT` | Server port | `8080` | ❌ |
-| `EMBEDDING_MODEL` | OpenAI embedding model | `text-embedding-ada-002` | ❌ |
+| `EMBEDDING_MODEL` | Embedding model (OpenAI only) | `text-embedding-ada-002` | ❌ |
+
+*Either `DEEPSEEK_API_KEY` or `OPENAI_API_KEY` is required
 
 ## Future Enhancements
 

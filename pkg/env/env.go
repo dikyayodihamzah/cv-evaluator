@@ -56,7 +56,31 @@ func GetString(key string, defaultValue ...string) string {
 
 	if len(defaultValue) > 0 {
 		return defaultValue[0]
-	} else {
+	}
+
+	// Built-in default values for DeepSeek and other services
+	switch key {
+	case "LLM_MODEL":
+		if GetString("DEEPSEEK_API_KEY") != "" {
+			return "deepseek-chat"
+		}
+		return "gpt-4"
+	case "LLM_BASE_URL":
+		if GetString("DEEPSEEK_API_KEY") != "" {
+			return "https://api.deepseek.com"
+		}
+		return "https://api.openai.com/v1"
+	case "EMBEDDING_MODEL":
+		return "text-embedding-ada-002"
+	case "ENVIRONMENT":
+		return "DEVELOPMENT"
+	case "PORT":
+		return "8080"
+	case "MINIO_BUCKET":
+		return "cv-evaluator"
+	case "MINIO_USE_SSL":
+		return "false"
+	default:
 		return ""
 	}
 }
