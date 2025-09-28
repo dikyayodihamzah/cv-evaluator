@@ -1,23 +1,19 @@
 package filesrv
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"path/filepath"
-	"slices"
 	"strings"
+	"time"
 
 	"github.com/dikyayodihamzah/cv-evaluator/pkg/env"
 	"github.com/dikyayodihamzah/cv-evaluator/pkg/exception"
-	"github.com/fumiama/go-docx"
+	"github.com/dikyayodihamzah/cv-evaluator/pkg/log"
 	"github.com/google/uuid"
-	"github.com/ledongthuc/pdf"
 	"github.com/minio/minio-go/v7"
-	"github.com/unidoc/unipdf/v3/extractor"
-	"github.com/unidoc/unipdf/v3/model"
 )
 
 type FileService interface {
@@ -36,39 +32,53 @@ func New(minioClient *minio.Client) FileService {
 }
 
 func (s *fileService) Upload(ctx context.Context, path string, files []*multipart.FileHeader) ([]string, error) {
+	logger := log.WithContext("FileService", "Upload")
+	start := time.Now()
+
+	logger.Info("Starting file upload, %d files", len(files))
+
 	// set default path
 	if path == "" {
 		path = "cv-files"
 	}
 
 	bucket := env.GetString("MINIO_BUCKET", "cv-evaluator")
+	logger.Debug("Uploading to bucket: %s, path: %s", bucket, path)
 
 	resURLs := make([]string, 0)
-	for _, file := range files {
+	for i, file := range files {
+		logger.Debug("Processing file %d/%d: %s (size: %d bytes)", i+1, len(files), file.Filename, file.Size)
 		// retrieve file extension
 		ext := strings.ToLower(filepath.Ext(file.Filename))
 		if ext == "" {
+			logger.Error("File %s has no extension", file.Filename)
 			return nil, exception.ErrorBadRequest("File must have an extension")
 		}
 
 		// validate file type
 		if !s.isValidFileType(ext) {
+			logger.Error("Unsupported file type: %s for file %s", ext, file.Filename)
 			return nil, exception.ErrorBadRequest("Unsupported file type: " + ext)
 		}
 
 		// validate file size (max 10MB)
 		maxSize := int64(10 * 1024 * 1024) // 10MB
 		if file.Size > maxSize {
+			logger.Error("File %s exceeds size limit: %d bytes > %d bytes", file.Filename, file.Size, maxSize)
 			return nil, exception.ErrorBadRequest("File size exceeds 10MB limit")
 		}
+
+		logger.Debug("File validation passed for %s", file.Filename)
 
 		// generate unique file name with timestamp and uuid
 		fileName := uuid.New().String() + ext
 		objectName := fmt.Sprintf("%s/%s", path, fileName)
+		logger.Debug("Generated object name: %s", objectName)
 
 		// open file
 		buffer, err := file.Open()
 		if err != nil {
+			logger.Error("Failed to open file %s: %v", file.Filename, err)
 			return nil, exception.ErrorInternal("Opening File Failed", err.Error())
 		}
 		defer buffer.Close()
@@ -78,30 +88,44 @@ func (s *fileService) Upload(ctx context.Context, path string, files []*multipar
 		if len(file.Header["Content-Type"]) > 0 {
 			contentType = file.Header["Content-Type"][0]
 		}
+		logger.Debug("Using content type: %s", contentType)
 
 		// upload to MinIO
+		logger.Debug("Uploading file to MinIO: %s", objectName)
 		if _, err := s.minioClient.PutObject(ctx, bucket, objectName, buffer, file.Size,
 			minio.PutObjectOptions{ContentType: contentType},
 		); err != nil {
+			logger.Error("Failed to upload file %s to MinIO: %v", objectName, err)
 			return nil, exception.ErrorInternal("Upload File Failed", err.Error())
 		}
 
+		logger.Debug("File uploaded successfully: %s", objectName)
 		resURLs = append(resURLs, objectName)
 	}
 
+	logger.Info("All files uploaded successfully, %d files processed", len(files))
+	logger.WithDuration(start)
 	return resURLs, nil
 }
 
 func (f *fileService) ExtractText(objectName string) (string, error) {
+	logger := log.WithContext("FileService", "ExtractText")
+	start := time.Now()
+
+	logger.Info("Starting text extraction from object: %s", objectName)
+
 	if objectName == "" {
+		logger.Error("Empty object name provided")
 		return "", fmt.Errorf("object name is empty")
 	}
 
 	bucket := env.GetString("MINIO_BUCKET", "cv-evaluator")
+	logger.Debug("Reading from bucket: %s, object: %s", bucket, objectName)
 
 	// Get file from MinIO
 	object, err := f.minioClient.GetObject(context.Background(), bucket, objectName, minio.GetObjectOptions{})
 	if err != nil {
+		logger.Error("Failed to get object from MinIO: %v", err)
 		return "", fmt.Errorf("failed to get file from storage: %w", err)
 	}
 	defer object.Close()
@@ -109,247 +133,37 @@ func (f *fileService) ExtractText(objectName string) (string, error) {
 	// Read file data
 	fileData, err := io.ReadAll(object)
 	if err != nil {
+		logger.Error("Failed to read file data: %v", err)
 		return "", fmt.Errorf("failed to read file data: %w", err)
 	}
+	logger.Debug("File data read successfully: %d bytes", len(fileData))
 
 	ext := strings.ToLower(filepath.Ext(objectName))
+	logger.Debug("Detected file extension: %s", ext)
 
+	var text string
 	switch ext {
 	case ".txt":
-		return f.extractFromTxt(fileData)
+		logger.Debug("Using TXT extraction method")
+		text, err = f.extractFromTxt(fileData)
 	case ".pdf":
-		return f.extractFromPDF(fileData)
+		logger.Debug("Using PDF extraction method")
+		text, err = f.extractFromPDF(fileData)
 	case ".docx":
-		return f.extractFromDocx(fileData)
+		logger.Debug("Using DOCX extraction method")
+		text, err = f.extractFromDocx(fileData)
 	default:
+		logger.Debug("Unknown extension, trying TXT extraction method")
 		// Try to read as plain text
-		return f.extractFromTxt(fileData)
-	}
-}
-
-func (f *fileService) isValidFileType(ext string) bool {
-	validTypes := []string{".txt", ".pdf", ".docx", ".doc"}
-	return slices.Contains(validTypes, ext)
-}
-
-func (f *fileService) extractFromTxt(fileData []byte) (string, error) {
-	return string(fileData), nil
-}
-
-func (f *fileService) extractFromPDF(fileData []byte) (string, error) {
-	// Try with unipdf first (more robust for complex PDFs)
-	text, err := f.extractPDFWithUnipdf(fileData)
-	if err == nil && strings.TrimSpace(text) != "" {
-		return text, nil
+		text, err = f.extractFromTxt(fileData)
 	}
 
-	// Fallback to ledongthuc/pdf
-	text, err = f.extractPDFWithLedongthuc(fileData)
-	if err == nil && strings.TrimSpace(text) != "" {
-		return text, nil
-	}
-
-	// If both fail, return a meaningful error
-	return "", fmt.Errorf("failed to extract text from PDF: both extraction methods failed")
-}
-
-func (f *fileService) extractPDFWithUnipdf(fileData []byte) (string, error) {
-	reader := bytes.NewReader(fileData)
-	pdfReader, err := model.NewPdfReader(reader)
 	if err != nil {
-		return "", fmt.Errorf("failed to create PDF reader: %w", err)
+		logger.Error("Text extraction failed: %v", err)
+		return "", err
 	}
 
-	// Check if PDF is encrypted
-	isEncrypted, err := pdfReader.IsEncrypted()
-	if err != nil {
-		return "", fmt.Errorf("failed to check encryption: %w", err)
-	}
-
-	if isEncrypted {
-		// Try to decrypt with empty password
-		success, err := pdfReader.Decrypt([]byte(""))
-		if err != nil || !success {
-			return "", fmt.Errorf("PDF is encrypted and cannot be decrypted")
-		}
-	}
-
-	numPages, err := pdfReader.GetNumPages()
-	if err != nil {
-		return "", fmt.Errorf("failed to get number of pages: %w", err)
-	}
-
-	var textBuilder strings.Builder
-
-	for pageNum := 1; pageNum <= numPages; pageNum++ {
-		page, err := pdfReader.GetPage(pageNum)
-		if err != nil {
-			continue // Skip pages that can't be read
-		}
-
-		ex, err := extractor.New(page)
-		if err != nil {
-			continue // Skip pages that can't be processed
-		}
-
-		pageText, err := ex.ExtractText()
-		if err != nil {
-			continue // Skip pages with extraction errors
-		}
-
-		textBuilder.WriteString(pageText)
-		textBuilder.WriteString("\n\n")
-	}
-
-	text := strings.TrimSpace(textBuilder.String())
-	if text == "" {
-		return "", fmt.Errorf("no text content found in PDF")
-	}
-
+	logger.Info("Text extraction completed successfully, extracted %d characters", len(text))
+	logger.WithDuration(start)
 	return text, nil
-}
-
-func (f *fileService) extractPDFWithLedongthuc(fileData []byte) (string, error) {
-	reader := bytes.NewReader(fileData)
-	pdfReader, err := pdf.NewReader(reader, int64(len(fileData)))
-	if err != nil {
-		return "", fmt.Errorf("failed to create PDF reader: %w", err)
-	}
-
-	var textBuilder strings.Builder
-	numPages := pdfReader.NumPage()
-
-	for pageNum := 1; pageNum <= numPages; pageNum++ {
-		page := pdfReader.Page(pageNum)
-		if page.V.IsNull() {
-			continue
-		}
-
-		pageText, err := page.GetPlainText(nil)
-		if err != nil {
-			continue // Skip pages with errors
-		}
-
-		textBuilder.WriteString(pageText)
-		textBuilder.WriteString("\n\n")
-	}
-
-	text := strings.TrimSpace(textBuilder.String())
-	if text == "" {
-		return "", fmt.Errorf("no text content found in PDF")
-	}
-
-	return text, nil
-}
-
-func (f *fileService) extractFromDocx(fileData []byte) (string, error) {
-	reader := bytes.NewReader(fileData)
-
-	// Parse the DOCX file
-	doc, err := docx.Parse(reader, int64(len(fileData)))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse DOCX file: %w", err)
-	}
-
-	var textBuilder strings.Builder
-
-	// Extract text from document body items
-	for _, item := range doc.Document.Body.Items {
-		switch v := item.(type) {
-		case *docx.Paragraph:
-			// Extract text from paragraph using built-in String() method
-			paragraphText := strings.TrimSpace(v.String())
-			if paragraphText != "" {
-				textBuilder.WriteString(paragraphText)
-				textBuilder.WriteString("\n")
-			}
-		case *docx.Table:
-			// Extract text from table
-			tableText := f.extractTableText(v)
-			if tableText != "" {
-				textBuilder.WriteString(tableText)
-				textBuilder.WriteString("\n")
-			}
-		}
-	}
-
-	text := strings.TrimSpace(textBuilder.String())
-	if text == "" {
-		return "", fmt.Errorf("no text content found in DOCX file")
-	}
-
-	// Clean up excessive whitespace
-	text = f.cleanupText(text)
-
-	return text, nil
-}
-
-// extractTableText extracts text from a table
-func (f *fileService) extractTableText(table *docx.Table) string {
-	var textBuilder strings.Builder
-
-	for _, row := range table.TableRows {
-		for _, cell := range row.TableCells {
-			cellText := f.extractTableCellText(cell)
-			if cellText != "" {
-				textBuilder.WriteString(cellText)
-				textBuilder.WriteString("\t") // Tab separation for table cells
-			}
-		}
-		textBuilder.WriteString("\n") // New line for table rows
-	}
-
-	return strings.TrimSpace(textBuilder.String())
-}
-
-// extractTableCellText extracts text from a table cell
-func (f *fileService) extractTableCellText(cell *docx.WTableCell) string {
-	var textBuilder strings.Builder
-
-	// Extract text from paragraphs in the cell using built-in String() method
-	for _, paragraph := range cell.Paragraphs {
-		paragraphText := strings.TrimSpace(paragraph.String())
-		if paragraphText != "" {
-			textBuilder.WriteString(paragraphText)
-			textBuilder.WriteString(" ")
-		}
-	}
-
-	// Extract text from nested tables in the cell
-	for _, table := range cell.Tables {
-		tableText := f.extractTableText(table)
-		if tableText != "" {
-			textBuilder.WriteString(tableText)
-			textBuilder.WriteString(" ")
-		}
-	}
-
-	return strings.TrimSpace(textBuilder.String())
-}
-
-// cleanupText removes excessive whitespace and normalizes line breaks
-func (f *fileService) cleanupText(text string) string {
-	// Replace multiple consecutive newlines with double newlines
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-
-	// Split into lines and clean each line
-	lines := strings.Split(text, "\n")
-	var cleanLines []string
-
-	for _, line := range lines {
-		// Trim whitespace from each line
-		cleanLine := strings.TrimSpace(line)
-		cleanLines = append(cleanLines, cleanLine)
-	}
-
-	// Join lines back and normalize spacing
-	cleaned := strings.Join(cleanLines, "\n")
-
-	// Replace multiple consecutive newlines with just two newlines (paragraph break)
-	for strings.Contains(cleaned, "\n\n\n") {
-		cleaned = strings.ReplaceAll(cleaned, "\n\n\n", "\n\n")
-	}
-
-	return strings.TrimSpace(cleaned)
 }

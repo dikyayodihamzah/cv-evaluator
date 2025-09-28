@@ -1,7 +1,6 @@
 package evalsrv
 
 import (
-	"errors"
 	"sync"
 	"time"
 
@@ -86,92 +85,3 @@ func (s *evaluationService) GetResult(jobID string) (*model.BaseResponse, error)
 
 	return response, nil
 }
-
-func (s *evaluationService) processEvaluation(jobID string) {
-	s.updateJobStatus(jobID, "processing")
-
-	// Simulate processing time
-	time.Sleep(2 * time.Second)
-
-	s.mutex.RLock()
-	job := s.jobs[jobID]
-	s.mutex.RUnlock()
-
-	// Extract content from all CV file
-	cvContent, err := s.fileService.ExtractText(job.Request.CVFile)
-	if err != nil {
-		s.markJobFailed(jobID, "Failed to extract CV content from file "+job.Request.CVFile+": "+err.Error())
-		return
-	}
-
-	// Get job description content
-	var jobDescription string
-	if job.Request.JobDescriptionFile != "" {
-		// Extract job description from file
-		jobDescContent, err := s.fileService.ExtractText(job.Request.JobDescriptionFile)
-		if err != nil {
-			s.markJobFailed(jobID, "Failed to extract job description content: "+err.Error())
-			return
-		}
-		jobDescription = jobDescContent
-	} else {
-		// Use provided job description text
-		jobDescription = job.Request.JobDescription
-	}
-
-	// Get project content - only if project file is provided
-	var result *cvweb.CVResponse
-
-	if job.Request.ProjectFile != "" {
-		// Extract project content from separate project file
-		projContent, err := s.fileService.ExtractText(job.Request.ProjectFile)
-		if err != nil {
-			s.markJobFailed(jobID, "Failed to extract project content from file "+job.Request.ProjectFile+": "+err.Error())
-			return
-		}
-
-		// Process with LLM (full evaluation including project)
-		result, err = s.llmService.EvaluateCandidate(cvContent, projContent, jobDescription)
-		if err != nil {
-			s.markJobFailed(jobID, "LLM evaluation failed: "+err.Error())
-			return
-		}
-	} else {
-		// No project file provided - evaluate only CV and provide default project info
-		var err error
-		result, err = s.llmService.EvaluateCVOnly(cvContent, jobDescription)
-		if err != nil {
-			s.markJobFailed(jobID, "LLM evaluation failed: "+err.Error())
-			return
-		}
-	}
-
-	s.mutex.Lock()
-	job.Status = "completed"
-	job.Result = result
-	job.Updated = time.Now()
-	s.mutex.Unlock()
-}
-
-func (s *evaluationService) updateJobStatus(jobID, status string) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	if job, exists := s.jobs[jobID]; exists {
-		job.Status = status
-		job.Updated = time.Now()
-	}
-}
-
-func (s *evaluationService) markJobFailed(jobID, errorMsg string) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	if job, exists := s.jobs[jobID]; exists {
-		job.Status = "failed"
-		job.Error = &errorMsg
-		job.Updated = time.Now()
-	}
-}
-
-var ErrJobNotFound = errors.New("job not found")

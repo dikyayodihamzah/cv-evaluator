@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dikyayodihamzah/cv-evaluator/config/llmclient"
+	"github.com/dikyayodihamzah/cv-evaluator/pkg/log"
 	"github.com/dikyayodihamzah/cv-evaluator/pkg/model/cvweb"
 	"github.com/dikyayodihamzah/cv-evaluator/pkg/resilience"
 	"github.com/dikyayodihamzah/cv-evaluator/service/ragsrv"
@@ -52,37 +53,65 @@ func New(ragService ragsrv.RAGService) LLMService {
 }
 
 func (s *llmService) EvaluateCandidate(cvContent, projectContent, jobDesc string) (*cvweb.CVResponse, error) {
+	logger := log.WithContext("LLMService", "EvaluateCandidate")
+	start := time.Now()
+
+	logger.Info("Starting full candidate evaluation (CV + Project)")
+	logger.Debug("Content sizes - CV: %d chars, Project: %d chars, Job desc: %d chars",
+		len(cvContent), len(projectContent), len(jobDesc))
+
 	// Step 1: Extract structured info from CV
+	logger.Debug("Step 1: Extracting structured CV information")
 	cvInfo, err := s.ExtractCVInfo(cvContent)
 	if err != nil {
+		logger.Error("Failed to extract CV info: %v", err)
 		return nil, fmt.Errorf("failed to extract CV info: %w", err)
 	}
+	logger.Debug("CV info extracted - Skills: %d, Experience: %d years, Projects: %d",
+		len(cvInfo.Skills), cvInfo.Experience, len(cvInfo.Projects))
 
 	// Step 2: Get relevant context from RAG
+	logger.Debug("Step 2: Retrieving RAG context")
 	cvRagContext, err := s.ragService.GetRelevantContext("cv_evaluation", jobDesc)
 	if err != nil {
+		logger.Warn("Failed to get CV RAG context, continuing without: %v", err)
 		cvRagContext = "" // Continue without RAG if it fails
+	} else {
+		logger.Debug("CV RAG context retrieved: %d characters", len(cvRagContext))
 	}
 
 	projectRagContext, err := s.ragService.GetRelevantContext("project_evaluation", projectContent)
 	if err != nil {
+		logger.Warn("Failed to get project RAG context, continuing without: %v", err)
 		projectRagContext = "" // Continue without RAG if it fails
+	} else {
+		logger.Debug("Project RAG context retrieved: %d characters", len(projectRagContext))
 	}
 
 	// Step 3: Score CV against job requirements
+	logger.Debug("Step 3: Scoring CV against job requirements")
 	cvEval, err := s.ScoreCV(cvInfo, jobDesc, cvRagContext)
 	if err != nil {
+		logger.Error("Failed to score CV: %v", err)
 		return nil, fmt.Errorf("failed to score CV: %w", err)
 	}
+	logger.Debug("CV scoring completed - Match rate: %.2f", cvEval.MatchRate)
 
 	// Step 4: Evaluate project
+	logger.Debug("Step 4: Evaluating project")
 	projectEval, err := s.EvaluateProject(projectContent, projectRagContext)
 	if err != nil {
+		logger.Error("Failed to evaluate project: %v", err)
 		return nil, fmt.Errorf("failed to evaluate project: %w", err)
 	}
+	logger.Debug("Project evaluation completed - Score: %.1f", projectEval.Score)
 
 	// Step 5: Generate overall summary
+	logger.Debug("Step 5: Generating overall summary")
 	overallSummary := s.generateOverallSummary(cvEval, projectEval)
+
+	logger.Info("Full candidate evaluation completed successfully")
+	logger.WithDuration(start)
 
 	return &cvweb.CVResponse{
 		CVMatchRate:     cvEval.MatchRate,
@@ -94,30 +123,52 @@ func (s *llmService) EvaluateCandidate(cvContent, projectContent, jobDesc string
 }
 
 func (s *llmService) EvaluateCVOnly(cvContent, jobDesc string) (*cvweb.CVResponse, error) {
+	logger := log.WithContext("LLMService", "EvaluateCVOnly")
+	start := time.Now()
+
+	logger.Info("Starting CV-only evaluation (no project file)")
+	logger.Debug("Content sizes - CV: %d chars, Job desc: %d chars", len(cvContent), len(jobDesc))
+
 	// Step 1: Extract structured info from CV
+	logger.Debug("Step 1: Extracting structured CV information")
 	cvInfo, err := s.ExtractCVInfo(cvContent)
 	if err != nil {
+		logger.Error("Failed to extract CV info: %v", err)
 		return nil, fmt.Errorf("failed to extract CV info: %w", err)
 	}
+	logger.Debug("CV info extracted - Skills: %d, Experience: %d years, Projects: %d",
+		len(cvInfo.Skills), cvInfo.Experience, len(cvInfo.Projects))
 
 	// Step 2: Get relevant context from RAG for CV evaluation
+	logger.Debug("Step 2: Retrieving RAG context for CV evaluation")
 	cvRagContext, err := s.ragService.GetRelevantContext("cv_evaluation", jobDesc)
 	if err != nil {
+		logger.Warn("Failed to get CV RAG context, continuing without: %v", err)
 		cvRagContext = "" // Continue without RAG if it fails
+	} else {
+		logger.Debug("CV RAG context retrieved: %d characters", len(cvRagContext))
 	}
 
 	// Step 3: Score CV against job requirements
+	logger.Debug("Step 3: Scoring CV against job requirements")
 	cvEval, err := s.ScoreCV(cvInfo, jobDesc, cvRagContext)
 	if err != nil {
+		logger.Error("Failed to score CV: %v", err)
 		return nil, fmt.Errorf("failed to score CV: %w", err)
 	}
+	logger.Debug("CV scoring completed - Match rate: %.2f", cvEval.MatchRate)
 
 	// Step 4: Provide default project information since no project file was provided
+	logger.Debug("Step 4: Setting default project information (no project file)")
 	defaultProjectScore := 0.0
 	defaultProjectFeedback := "No project file provided for evaluation. To get a comprehensive project assessment, please upload a separate project file containing technical documentation, code samples, or project reports."
 
 	// Step 5: Generate CV-only summary
+	logger.Debug("Step 5: Generating CV-only summary")
 	overallSummary := s.generateCVOnlySummary(cvEval)
+
+	logger.Info("CV-only evaluation completed successfully")
+	logger.WithDuration(start)
 
 	return &cvweb.CVResponse{
 		CVMatchRate:     cvEval.MatchRate,
@@ -217,30 +268,4 @@ func (s *llmService) EvaluateProject(projectContent, ragContext string) (*Projec
 	}
 
 	return result, nil
-}
-
-func (s *llmService) generateOverallSummary(cvEval *CVEvaluation, projectEval *ProjectEvaluation) string {
-	totalScore := cvEval.MatchRate*10 + projectEval.Score
-
-	if totalScore >= 15 {
-		return "Excellent candidate fit. Strong technical background with proven project delivery capabilities."
-	} else if totalScore >= 12 {
-		return "Good candidate fit. Solid foundation with room for growth in specific areas."
-	} else if totalScore >= 9 {
-		return "Moderate candidate fit. Shows potential but would benefit from additional training and experience."
-	}
-
-	return "Limited candidate fit. Significant gaps in required skills and experience."
-}
-
-func (s *llmService) generateCVOnlySummary(cvEval *CVEvaluation) string {
-	if cvEval.MatchRate >= 0.8 {
-		return "Strong CV match for the position. Candidate demonstrates excellent alignment with job requirements based on background and experience. Project evaluation not available - upload project files for complete assessment."
-	} else if cvEval.MatchRate >= 0.7 {
-		return "Good CV match for the position. Candidate shows solid qualifications with minor gaps in some areas. Project evaluation not available - consider uploading project files to get a comprehensive evaluation."
-	} else if cvEval.MatchRate >= 0.6 {
-		return "Moderate CV match for the position. Candidate has relevant experience but may require additional training in specific areas. Project evaluation not available - project files would provide better insight into technical capabilities."
-	} else {
-		return "Limited CV match for the position. Significant gaps identified in required qualifications. Project evaluation not available - project files could potentially demonstrate practical skills not evident in the CV."
-	}
 }
