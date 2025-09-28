@@ -97,22 +97,34 @@ func (s *evaluationService) processEvaluation(jobID string) {
 	job := s.jobs[jobID]
 	s.mutex.RUnlock()
 
-	// Extract CV content
+	// Extract content from all CV file
 	cvContent, err := s.fileService.ExtractText(job.Request.CVFile)
 	if err != nil {
-		s.markJobFailed(jobID, "Failed to extract CV content: "+err.Error())
+		s.markJobFailed(jobID, "Failed to extract CV content from file "+job.Request.CVFile+": "+err.Error())
 		return
 	}
 
-	// Extract project content
-	projectContent, err := s.fileService.ExtractText(job.Request.ProjectFile)
-	if err != nil {
-		s.markJobFailed(jobID, "Failed to extract project content: "+err.Error())
-		return
+	// Get job description content
+	var jobDescription string
+	if job.Request.JobDescriptionFile != "" {
+		// Extract job description from file
+		jobDescContent, err := s.fileService.ExtractText(job.Request.JobDescriptionFile)
+		if err != nil {
+			s.markJobFailed(jobID, "Failed to extract job description content: "+err.Error())
+			return
+		}
+		jobDescription = jobDescContent
+	} else {
+		// Use provided job description text
+		jobDescription = job.Request.JobDescription
 	}
+
+	// For project content, we'll extract it from the CV files (treating them as complete documents)
+	// In a real implementation, you might want to separate CV and project content
+	projectContent := cvContent // Using CV content as project content for now
 
 	// Process with LLM
-	result, err := s.llmService.EvaluateCandidate(cvContent, projectContent, job.Request.JobDesc)
+	result, err := s.llmService.EvaluateCandidate(cvContent, projectContent, jobDescription)
 	if err != nil {
 		s.markJobFailed(jobID, "LLM evaluation failed: "+err.Error())
 		return

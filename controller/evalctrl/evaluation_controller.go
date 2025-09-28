@@ -33,6 +33,22 @@ func (c *evaluationController) evaluate(ctx *fiber.Ctx) error {
 		})
 	}
 
+	// Validate request
+	if req.CVFile == "" {
+		return ctx.Status(fiber.StatusBadRequest).JSON(model.BaseResponse{
+			Status:  "error",
+			Message: "CV file is required",
+		})
+	}
+
+	// Check if job description is provided either as text or file
+	if req.JobDescription == "" && req.JobDescriptionFile == "" {
+		return ctx.Status(fiber.StatusBadRequest).JSON(model.BaseResponse{
+			Status:  "error",
+			Message: "Either job_description or job_description_file is required",
+		})
+	}
+
 	jobID, err := c.EvaluationService.StartEvaluation(req)
 	if err != nil {
 		return ctx.Status(fiber.StatusInternalServerError).JSON(model.BaseResponse{

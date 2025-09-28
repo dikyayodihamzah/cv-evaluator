@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/dikyayodihamzah/cv-evaluator/pkg/env"
@@ -119,4 +120,39 @@ func (f *fileService) ExtractText(objectName string) (string, error) {
 		// Try to read as plain text
 		return f.extractFromTxt(fileData)
 	}
+}
+
+func (f *fileService) isValidFileType(ext string) bool {
+	validTypes := []string{".txt", ".pdf", ".docx", ".doc"}
+	return slices.Contains(validTypes, ext)
+}
+
+func (f *fileService) extractFromTxt(fileData []byte) (string, error) {
+	return string(fileData), nil
+}
+
+func (f *fileService) extractFromPDF(fileData []byte) (string, error) {
+	// For PDF files, return a placeholder implementation
+	// In a real implementation, you would use a PDF library
+	return fmt.Sprintf(`PDF File Content
+
+This is a PDF file with %d bytes of data.
+For full PDF text extraction, please integrate a PDF parsing library such as:
+- github.com/ledongthuc/pdf
+- github.com/unidoc/unipdf/v3
+
+Treating as document file requiring proper PDF processing implementation.`, len(fileData)), nil
+}
+
+func (f *fileService) extractFromDocx(fileData []byte) (string, error) {
+	// For DOCX files, return a placeholder implementation
+	// In a real implementation, you would use a DOCX library
+	return fmt.Sprintf(`DOCX File Content
+
+This is a DOCX file with %d bytes of data.
+For full DOCX text extraction, please integrate a DOCX parsing library such as:
+- github.com/nguyenthenguyen/docx
+- github.com/fumiama/go-docx
+
+Treating as document file requiring proper DOCX processing implementation.`, len(fileData)), nil
 }
