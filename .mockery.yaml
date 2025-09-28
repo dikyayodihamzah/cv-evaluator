@@ -1,0 +1,13 @@
+packages:
+  github.com/dikyayodihamzah/cv-evaluator/service/filesrv:
+    interfaces:
+      FileService:
+  github.com/dikyayodihamzah/cv-evaluator/service/llmsrv:
+    interfaces:
+      LLMService:
+  github.com/dikyayodihamzah/cv-evaluator/service/ragsrv:
+    interfaces:
+      RAGService:
+  github.com/dikyayodihamzah/cv-evaluator/service/evalsrv:
+    interfaces:
+      EvaluationService:

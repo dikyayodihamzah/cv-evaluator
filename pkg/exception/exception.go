@@ -16,7 +16,7 @@ import (
 var ShowErrorDescription bool = strings.EqualFold(env.GetString("ENVIRONMENT"), "LOCAL") || strings.EqualFold(env.GetString("ENVIRONMENT"), "DEVELOPMENT")
 
 func Handler(c *fiber.Ctx, err error) error {
-	log.Error(err.Error())
+	log.Error("%s", err.Error())
 	code := fiber.StatusInternalServerError
 
 	var e *fiber.Error

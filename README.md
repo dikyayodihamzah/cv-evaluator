@@ -142,6 +142,61 @@ go build -o cv-evaluator .
 
 The service will start on the configured port (default: 8080).
 
+## Testing
+
+The project includes comprehensive unit tests for all service layers using [testify](https://github.com/stretchr/testify) and [mockery](https://github.com/vektra/mockery) for mocking.
+
+### Quick Test Commands
+
+```bash
+# Run all tests with our test runner script
+./scripts/run-tests.sh
+
+# Run specific service tests
+./scripts/run-tests.sh -s file     # File service tests
+./scripts/run-tests.sh -s llm      # LLM service tests
+./scripts/run-tests.sh -s rag      # RAG service tests
+./scripts/run-tests.sh -s evaluation # Evaluation service tests
+
+# Run with coverage
+./scripts/run-tests.sh -a
+
+# Run benchmarks
+./scripts/run-tests.sh -b
+
+# Run with race detection
+./scripts/run-tests.sh -r
+```
+
+### Manual Test Commands
+
+```bash
+# Run all service tests
+go test ./service/... -v
+
+# Run tests with coverage
+go test ./service/... -v -coverprofile=coverage.out
+go tool cover -html=coverage.out
+
+# Run specific service tests
+go test ./service/filesrv -v
+go test ./service/llmsrv -v
+go test ./service/ragsrv -v
+go test ./service/evalsrv -v
+```
+
+### Test Coverage
+
+The test suite covers:
+- **File Operations**: Upload validation, text extraction (PDF, DOCX, TXT)
+- **LLM Integration**: CV extraction, scoring, project evaluation
+- **RAG Functionality**: Document indexing, context retrieval, similarity matching
+- **Job Management**: Async processing, status tracking, error handling
+- **Logging Integration**: All operations include comprehensive logging
+- **Error Scenarios**: Service failures, invalid inputs, edge cases
+
+For detailed testing documentation, see [TESTING.md](TESTING.md).
+
 ## Usage Examples
 
 ### 1. Upload Files
