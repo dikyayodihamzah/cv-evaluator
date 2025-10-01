@@ -85,7 +85,30 @@ A comprehensive backend service that evaluates candidate CVs and project reports
 - MinIO Server (for cloud storage)
 - Git
 
-### Setup
+### Setup with Docker (the easiest way)
+
+#### Prerequisites
+- [All the prerequisites above](#prerequisites)
+- Docker
+- Docker Compose
+
+1. **Clone the repository:**
+```bash
+git clone <repository-url>
+cd cv-evaluator
+```
+
+2. **Configure environment variables:**
+[Refer to setup manually section point environment variables configuration](#setup-manually)
+
+3. **Run:**
+```bash
+docker compose up -d --build
+```
+
+The service will start on the configured port (default: 8080).
+
+### Setup Manually
 
 1. **Clone the repository:**
 ```bash
